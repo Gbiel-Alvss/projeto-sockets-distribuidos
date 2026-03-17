@@ -8,7 +8,7 @@ from common import send_json, extract_messages, BUFFER_SIZE
 HOST = "0.0.0.0"
 PORT = 5000
 
-SERVER_UUID = str(uuid.uuid4())
+SERVER_UUID = 'cd46f1b8-a974-4f11-acac-fe9e5b590700'
 
 
 def process_message(conn, addr, payload):
