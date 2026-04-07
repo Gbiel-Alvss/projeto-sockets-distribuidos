@@ -2,16 +2,25 @@ import socket
 import threading
 import uuid
 import json
+import argparse
 
 from common import send_json, extract_messages, BUFFER_SIZE
 
 HOST = "0.0.0.0"
 PORT = 5000
 
-SERVER_UUID = 'cd46f1b8-a974-4f11-acac-fe9e5b590700'
+SERVER_UUID = "cd46f1b8-a974-4f11-acac-fe9e5b590700"
 
 
-def process_message(conn, addr, payload):
+def build_parser():
+    parser = argparse.ArgumentParser(description="Servidor master para heartbeat dos workers")
+    parser.add_argument("--host", default=HOST, help="IP de bind do servidor")
+    parser.add_argument("--port", type=int, default=PORT, help="Porta de bind do servidor")
+    parser.add_argument("--uuid", default=SERVER_UUID, help="UUID logico do master")
+    return parser
+
+
+def process_message(conn, addr, payload, server_uuid):
     """
     Processa uma mensagem recebida do worker
     """
@@ -21,7 +30,7 @@ def process_message(conn, addr, payload):
 
     if task == "HEARTBEAT":
         response = {
-            "SERVER_UUID": SERVER_UUID,
+            "SERVER_UUID": server_uuid,
             "TASK": "HEARTBEAT",
             "RESPONSE": "ALIVE"
         }
@@ -30,7 +39,7 @@ def process_message(conn, addr, payload):
 
     else:
         response = {
-            "SERVER_UUID": SERVER_UUID,
+            "SERVER_UUID": server_uuid,
             "TASK": task if task else "UNKNOWN",
             "RESPONSE": "INVALID_TASK"
         }
@@ -38,7 +47,7 @@ def process_message(conn, addr, payload):
         print(f"[TAREFA INVÁLIDA PARA {addr}] {response}")
 
 
-def handle_client(conn, addr):
+def handle_client(conn, addr, server_uuid):
     """
     Trata a conexão de um cliente em uma thread separada
     """
@@ -62,7 +71,7 @@ def handle_client(conn, addr):
                     payload = json.loads(message)
                     print("Mensagem recebida:")
                     print(json.dumps(payload, indent=4))
-                    process_message(conn, addr, payload)
+                    process_message(conn, addr, payload, server_uuid)
                 except json.JSONDecodeError:
                     print(f"[ERRO] JSON inválido de {addr}: {message}")
 
@@ -77,19 +86,21 @@ def handle_client(conn, addr):
 
 
 def main():
+    args = build_parser().parse_args()
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
+    server.bind((args.host, args.port))
     server.listen()
 
-    print(f"[SERVIDOR ATIVO] Escutando em {HOST}:{PORT}")
-    print(f"[SERVER_UUID] {SERVER_UUID}")
+    print(f"[SERVIDOR ATIVO] Escutando em {args.host}:{args.port}")
+    print(f"[SERVER_UUID] {args.uuid}")
 
     while True:
         conn, addr = server.accept()
 
         client_thread = threading.Thread(
             target=handle_client,
-            args=(conn, addr),
+            args=(conn, addr, args.uuid),
             daemon=True
         )
         client_thread.start()

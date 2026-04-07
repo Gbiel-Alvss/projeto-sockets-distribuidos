@@ -5,13 +5,13 @@ import uuid
 
 from common import free_disk, recv_json, send_json
 
-WORKER_ID, WORKER_HOST, ELECTION_PORT = "A2", "10.62.206.43", 6002
+WORKER_ID, WORKER_HOST, ELECTION_PORT = "A3", "10.62.206.49", 6003
 MASTER_PORT = 5000
 MASTER_HOST, MASTER_UUID = "10.62.206.50", "MASTER-INICIAL"
 HB_TIMEOUT, HB_INTERVAL, MAX_ERRORS = 3, 5, 4
 PEERS = [
     {"worker_id": "A1", "host": "10.62.206.44", "election_port": 6001},
-    {"worker_id": "A3", "host": "10.62.206.49", "election_port": 6003},
+    {"worker_id": "A2", "host": "10.62.206.43", "election_port": 6002},
 ]
 STATE = {"master_host": MASTER_HOST, "master_uuid": MASTER_UUID, "is_master": False, "electing": False}
 LOCK = threading.Lock()
@@ -148,6 +148,7 @@ def main():
             errors = 0
             run_election()
         time.sleep(HB_INTERVAL)
+
 
 if __name__ == "__main__":
     main()
