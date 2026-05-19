@@ -1,0 +1,100 @@
+import logging
+import random
+import socket
+import time
+import uuid
+from net import encode_message, decode_stream
+from protocol import validate_ack, validate_heartbeat_response, validate_task_delivery
+
+WORKER_ID = "W-1"
+MASTER_ID = "Master_A"
+MASTER_HOST = "127.0.0.1"
+MASTER_PORT = 9000
+HEARTBEAT_INTERVAL = 10
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+def parse_address(address):
+    host, port = address.split(":")
+    return host, int(port)
+
+
+def run_worker():
+    current_host = MASTER_HOST
+    current_port = MASTER_PORT
+    original_master_id = MASTER_ID
+    original_master_address = f"{MASTER_HOST}:{MASTER_PORT}"
+    borrowed = False
+
+    while True:
+        try:
+            with socket.create_connection((current_host, current_port), timeout=5) as s:
+                buffer = b""
+                heartbeat = {"SERVER_UUID": MASTER_ID, "TASK": "HEARTBEAT"}
+                s.sendall(encode_message(heartbeat))
+
+                if borrowed:
+                    register = {
+                        "type": "register_temporary_worker",
+                        "request_id": str(uuid.uuid4()),
+                        "payload": {
+                            "worker_id": WORKER_ID,
+                            "original_master_address": original_master_address,
+                        },
+                    }
+                    s.sendall(encode_message(register))
+
+                while True:
+                    hello = {"WORKER": "ALIVE", "WORKER_UUID": WORKER_ID}
+                    if borrowed:
+                        hello["SERVER_UUID"] = original_master_id
+                    s.sendall(encode_message(hello))
+
+                    should_reconnect = False
+                    start = time.time()
+                    while time.time() - start < 5:
+                        data = s.recv(4096)
+                        if not data:
+                            raise ConnectionError("connection closed")
+                        buffer += data
+                        messages, buffer = decode_stream(buffer)
+                        for msg in messages:
+                            if msg.get("type") == "command_redirect":
+                                new_master_address = msg["payload"]["new_master_address"]
+                                current_host, current_port = parse_address(new_master_address)
+                                borrowed = True
+                                should_reconnect = True
+                                break
+                            if msg.get("type") == "command_release":
+                                original_master_address = msg["payload"]["original_master_address"]
+                                current_host, current_port = parse_address(original_master_address)
+                                borrowed = False
+                                should_reconnect = True
+                                break
+                            if msg.get("TASK") in ("QUERY", "NO_TASK"):
+                                validate_task_delivery(msg)
+                                if msg.get("TASK") == "NO_TASK":
+                                    time.sleep(1)
+                                    break
+                                time.sleep(random.uniform(0.2, 0.8))
+                                status = {"STATUS": "OK", "TASK": "QUERY", "WORKER_UUID": WORKER_ID}
+                                s.sendall(encode_message(status))
+                            elif msg.get("RESPONSE") == "ALIVE":
+                                validate_heartbeat_response(msg)
+                            elif msg.get("STATUS") == "ACK":
+                                validate_ack(msg)
+                        break
+
+                    if should_reconnect:
+                        break
+
+                if should_reconnect:
+                    break
+        except Exception as exc:
+            logging.warning("worker reconnecting after error: %s", exc)
+            time.sleep(2)
+
+
+if __name__ == "__main__":
+    run_worker()

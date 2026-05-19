@@ -1,75 +1,110 @@
-# Projeto sockets distribuidos - Master com eleicao de workers
+# P2P Load Balancing (Master/Worker)
 
-Este projeto roda com:
-- 1 computador master inicial
-- 3 computadores workers
+Projeto de Arquitetura de Sistemas Distribuidos: Masters e Workers com balanceamento de carga P2P, seguindo o protocolo do PDF.
 
-Regra implementada:
-- cada worker envia heartbeat para o master atual
-- se houver 4 falhas consecutivas de conexao/heartbeat, o worker inicia eleicao
-- o worker eleito como novo master e aquele com maior espaco livre em disco
-- apos consenso de maioria entre os workers alcancaveis, o novo master sobe servidor e passa a responder heartbeat
+## Requisitos
+- Windows
+- Python 3.11+
 
-## Arquivos principais
-- server.py: master inicial
-- common.py: funcoes de socket + runtime de eleicao/consenso
-- worker_1.py: configuracao do worker A1
-- worker-2.py: configuracao do worker A2
-- worker_3.py: configuracao do worker A3
+## Estrutura
+- `master.py`: servidor TCP, fila de tarefas, negociacao P2P
+- `worker.py`: cliente TCP, heartbeat, ciclo de tarefas, redirecionamento
+- `loadgen.py`: injeta tarefas para simular carga
+- `protocol.py`: validacao de payloads
+- `net.py`: framing JSON com delimitador `\n`
 
-## Portas usadas
-- 5000: heartbeat do master
-- 6001: canal de eleicao do worker A1
-- 6002: canal de eleicao do worker A2
-- 6003: canal de eleicao do worker A3
+## Como rodar (local)
+1. Terminal 1 (Master):
+   ```
+   python master.py
+   ```
+2. Terminal 2..4 (Workers):
+   ```
+   python worker.py
+   ```
+3. Terminal 5 (Carga):
+   ```
+   python loadgen.py
+   ```
 
-Libere essas portas no firewall dos respectivos computadores.
+## Demo rapida
+```
+python run_demo.py
+```
 
-## Passo 1 - ajustar IPs
-Edite os 3 arquivos de worker para o IP real de cada maquina:
-- worker_1.py
-- worker-2.py
-- worker_3.py
+## Configuracao (dentro dos .py)
+Edite os valores no topo dos arquivos:
 
-Em cada worker, ajuste as constantes:
-- WORKER_HOST: IP da propria maquina worker
-- MASTER_HOST: IP da maquina master inicial
-- PEERS: IP e porta de eleicao dos outros 2 workers
+### master.py
+- `MASTER_ID`, `HOST`, `PORT`
+- `PEERS`: lista de masters vizinhos (ip:porta)
+- `NEIGHBORS`: mapa `master_id -> ip:porta`
+- `CAPACITY`, `RELEASE_THRESHOLD`
 
-Exemplo de topologia:
-- master inicial: 192.168.0.10
-- worker A1: 192.168.0.11
-- worker A2: 192.168.0.12
-- worker A3: 192.168.0.13
+### worker.py
+- `WORKER_ID`
+- `MASTER_ID`, `MASTER_HOST`, `MASTER_PORT`
 
-## Passo 2 - executar em cada computador
-Use Python 3.10+.
+## Protocolo (resumo)
+### Sprint 01 - Heartbeat
+Worker -> Master:
+```
+{"SERVER_UUID":"Master_A","TASK":"HEARTBEAT"}
+```
+Master -> Worker:
+```
+{"SERVER_UUID":"Master_A","TASK":"HEARTBEAT","RESPONSE":"ALIVE"}
+```
 
-No computador master inicial:
+### Sprint 02 - Ciclo de tarefas
+Worker -> Master (apresentacao):
+```
+{"WORKER":"ALIVE","WORKER_UUID":"W-1"}
+```
+Worker emprestado:
+```
+{"WORKER":"ALIVE","WORKER_UUID":"W-2","SERVER_UUID":"Master_B"}
+```
+Master -> Worker:
+```
+{"TASK":"QUERY","USER":"Michel"}
+```
+ou
+```
+{"TASK":"NO_TASK"}
+```
+Worker -> Master (status):
+```
+{"STATUS":"OK","TASK":"QUERY","WORKER_UUID":"W-1"}
+```
+Master -> Worker (ack):
+```
+{"STATUS":"ACK","WORKER_UUID":"W-1"}
+```
 
-python server.py --host 0.0.0.0 --port 5000 --uuid MASTER-INICIAL
+### Sprint 03 - Master to Master
+Estrutura:
+```
+{
+  "type": "request_help",
+  "request_id": "uuid",
+  "payload": {"master_id":"A","current_load":150,"capacity":100,"workers_needed":2}
+}
+```
+Tipos suportados:
+- `request_help`
+- `response_accepted`
+- `response_rejected`
+- `command_redirect`
+- `register_temporary_worker`
+- `command_release`
+- `notify_worker_returned`
 
-No computador worker A1:
-
-python worker_1.py
-
-No computador worker A2:
-
-python worker-2.py
-
-No computador worker A3:
-
-python worker_3.py
-
-## Como validar failover
-1. Suba master e os 3 workers.
-2. Verifique nos logs dos workers mensagens de master ativo.
-3. Derrube o processo do master inicial.
-4. Aguarde 4 ciclos de falha de heartbeat.
-5. Observe logs de eleicao e anuncio de novo master.
-6. Verifique os outros workers voltando a reportar heartbeat para o novo master.
+## Interoperabilidade
+- O Master aceita Workers externos que sigam o protocolo.
+- Os Workers podem ser redirecionados para Masters externos via `command_redirect`.
 
 ## Observacoes
-- Em empate de espaco livre, o desempate e pelo worker_id (ordem lexicografica).
-- O calculo de maioria usa os workers alcancaveis no momento da eleicao.
-- Todos os workers devem ter relogio e rede estaveis para reduzir falso positivo de downtime.
+- JSON sempre termina com `\n`.
+- Campos desconhecidos sao ignorados; campos obrigatorios faltando geram log de erro.
+- Timeouts de 5s para respostas de Master e Worker.
