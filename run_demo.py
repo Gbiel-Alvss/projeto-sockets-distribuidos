@@ -6,7 +6,8 @@ import time
 def run_demo():
     master = subprocess.Popen([sys.executable, "master.py"])
     time.sleep(1)
-    workers = [subprocess.Popen([sys.executable, "worker.py"]) for _ in range(3)]
+    worker_scripts = ["worker_1.py", "worker-2.py", "worker_3.py"]
+    workers = [subprocess.Popen([sys.executable, script]) for script in worker_scripts]
     time.sleep(2)
     load = subprocess.Popen([sys.executable, "loadgen.py"])
     load.wait()

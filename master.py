@@ -13,7 +13,7 @@ from protocol import (
 )
 
 MASTER_ID = "Master_A"
-HOST = "192.168.56.1"
+HOST = "0.0.0.0"
 PORT = 9000
 MASTER_ADDRESS = f"{HOST}:{PORT}"
 

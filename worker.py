@@ -3,14 +3,16 @@ import random
 import socket
 import time
 import uuid
+import os
 from net import encode_message, decode_stream
 from protocol import validate_ack, validate_heartbeat_response, validate_task_delivery
 
-WORKER_ID = "W-1"
-MASTER_ID = "Master_A"
-MASTER_HOST = "127.0.0.1"
-MASTER_PORT = 9000
-HEARTBEAT_INTERVAL = 10
+WORKER_ID = os.getenv("WORKER_ID", "W-1")
+MASTER_ID = os.getenv("MASTER_ID", "Master_A")
+# default kept for existing behavior but can be overridden with env var
+MASTER_HOST = os.getenv("MASTER_HOST", "127.0.0.1")
+MASTER_PORT = int(os.getenv("MASTER_PORT", os.getenv("PORT", "9000")))
+HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "10"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -24,11 +26,14 @@ def run_worker():
     current_host = MASTER_HOST
     current_port = MASTER_PORT
     original_master_id = MASTER_ID
-    original_master_address = f"{MASTER_HOST}:{MASTER_PORT}"
+    original_master_address = f"{current_host}:{current_port}"
     borrowed = False
+
+    logging.info("worker config: WORKER_ID=%s MASTER_HOST=%s MASTER_PORT=%s", WORKER_ID, current_host, current_port)
 
     while True:
         try:
+            logging.info("connecting to master %s:%s", current_host, current_port)
             with socket.create_connection((current_host, current_port), timeout=5) as s:
                 buffer = b""
                 heartbeat = {"SERVER_UUID": MASTER_ID, "TASK": "HEARTBEAT"}
