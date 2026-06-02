@@ -1,8 +1,8 @@
 import os
 
 os.environ.setdefault("WORKER_ID", "W-2")
-os.environ.setdefault("MASTER_HOST", "127.0.0.1")
-os.environ.setdefault("MASTER_PORT", "9000")
+os.environ.setdefault("MASTER_HOST", "10.62.206.48")
+os.environ.setdefault("MASTER_PORT", "10000")
 
 from worker import run_worker
 

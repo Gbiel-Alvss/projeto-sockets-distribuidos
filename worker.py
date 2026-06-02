@@ -7,11 +7,11 @@ import os
 from net import encode_message, decode_stream
 from protocol import validate_ack, validate_heartbeat_response, validate_task_delivery
 
-WORKER_ID = os.getenv("WORKER_ID", "W-1")
-MASTER_ID = os.getenv("MASTER_ID", "Master_A")
+WORKER_ID = os.getenv("WORKER_ID", "W-2")
+MASTER_ID = os.getenv("MASTER_ID", "Master_16")
 # default kept for existing behavior but can be overridden with env var
-MASTER_HOST = os.getenv("MASTER_HOST", "127.0.0.1")
-MASTER_PORT = int(os.getenv("MASTER_PORT", os.getenv("PORT", "9000")))
+MASTER_HOST = os.getenv("MASTER_HOST", "10.62.206.20")
+MASTER_PORT = int(os.getenv("MASTER_PORT", os.getenv("PORT", "10000")))
 HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "10"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

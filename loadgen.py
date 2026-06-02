@@ -3,8 +3,8 @@ import socket
 import time
 from net import encode_message
 
-MASTER_HOST = "127.0.0.1"
-MASTER_PORT = 9000
+MASTER_HOST = "10.62.206.20"
+MASTER_PORT = 10000
 
 
 def run_load():

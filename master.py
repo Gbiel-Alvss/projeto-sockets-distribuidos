@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import queue
 import socket
@@ -14,11 +15,11 @@ from protocol import (
 
 MASTER_ID = "Master_A"
 HOST = "0.0.0.0"
-PORT = 9000
+PORT = 10000
 MASTER_ADDRESS = f"{HOST}:{PORT}"
 
-PEERS = ["127.0.0.1:9100"]
-NEIGHBORS = {"Master_B": "127.0.0.1:9100"}
+PEERS = ["10.62.206.216:9100"]
+NEIGHBORS = {"Master_B": "10.62.206.216:9100"}
 
 CAPACITY = 100
 RELEASE_THRESHOLD = 60
@@ -108,21 +109,22 @@ def handle_master_message(msg, conn):
 
 
 def request_help():
-    for peer in PEERS:
+    request_id = str(uuid.uuid4())
+    msg = {
+        "type": "request_help",
+        "request_id": request_id,
+        "payload": {
+            "master_id": MASTER_ID,
+            "current_load": TASK_QUEUE.qsize(),
+            "capacity": CAPACITY,
+            "workers_needed": 1,
+        },
+    }
+
+    def ask_peer(peer):
         host, port = peer.split(":")
         try:
             with socket.create_connection((host, int(port)), timeout=5) as s:
-                request_id = str(uuid.uuid4())
-                msg = {
-                    "type": "request_help",
-                    "request_id": request_id,
-                    "payload": {
-                        "master_id": MASTER_ID,
-                        "current_load": TASK_QUEUE.qsize(),
-                        "capacity": CAPACITY,
-                        "workers_needed": 1,
-                    },
-                }
                 send_message(s, msg)
                 s.settimeout(5)
                 buffer = b""
@@ -133,7 +135,18 @@ def request_help():
                         if resp.get("request_id") == request_id:
                             return resp
         except Exception as exc:
-            logging.warning("peer request failed: %s", exc)
+            logging.warning("peer request failed for %s: %s", peer, exc)
+        return None
+
+    # Dispara os requests concorrentemente para todos os PEERS listados
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(ask_peer, peer) for peer in PEERS]
+        for future in concurrent.futures.as_completed(futures):
+            resp = future.result()
+            # Retorna no primeiro peer que aceitar a requisição
+            if resp and resp.get("type") == "response_accepted":
+                return resp
+                
     return None
 
 
@@ -143,15 +156,24 @@ def release_borrowed_workers():
 
     for worker_id, original_master_address in borrowed_items:
         worker_conn = WORKERS.get(worker_id, {}).get("conn")
-        if not worker_conn:
-            continue
-        release = {
-            "type": "command_release",
-            "request_id": str(uuid.uuid4()),
-            "payload": {"original_master_address": original_master_address},
-        }
-        send_message(worker_conn, release)
+        
+        # 1. Envia comando de release para o Worker (se ainda conectado)
+        if worker_conn:
+            release = {
+                "type": "command_release",
+                "request_id": str(uuid.uuid4()),
+                "payload": {"original_master_address": original_master_address},
+            }
+            try:
+                send_message(worker_conn, release)
+            except Exception as exc:
+                logging.warning("failed to send command_release to worker %s: %s", worker_id, exc)
 
+        # 2. Garante a remoção local para não ficar como fantasma, independente do Master de origem
+        with LOCK:
+            BORROWED_WORKERS.pop(worker_id, None)
+
+        # 3. Tenta notificar o Master Original, tolerando a falha se ele estiver offline
         host, port = original_master_address.split(":")
         try:
             with socket.create_connection((host, int(port)), timeout=5) as s:
@@ -162,7 +184,7 @@ def release_borrowed_workers():
                 }
                 send_message(s, notify)
         except Exception as exc:
-            logging.warning("notify master failed: %s", exc)
+            logging.warning("notify origin master failed (Master may be offline): %s", exc)
 
 
 def monitor_load():
