@@ -1,4 +1,5 @@
 import concurrent.futures
+import os
 import logging
 import queue
 import socket
@@ -23,6 +24,8 @@ NEIGHBORS = {"Master_B": "10.62.206.216:9100"}
 
 CAPACITY = 100
 RELEASE_THRESHOLD = 60
+TASK_GENERATOR_COUNT = int(os.getenv("TASK_GENERATOR_COUNT", "0"))
+TASK_GENERATOR_DELAY = float(os.getenv("TASK_GENERATOR_DELAY", "0.1"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -196,6 +199,14 @@ def monitor_load():
         time.sleep(1)
 
 
+def task_generator():
+    for index in range(TASK_GENERATOR_COUNT):
+        TASK_QUEUE.put(f"User-{index}")
+        logging.info("generated task %s/%s", index + 1, TASK_GENERATOR_COUNT)
+        if TASK_GENERATOR_DELAY > 0:
+            time.sleep(TASK_GENERATOR_DELAY)
+
+
 def handle_connection(conn, addr):
     logging.info("connection from %s", addr)
     buffer = b""
@@ -262,6 +273,9 @@ def accept_loop():
 
 
 def run_master():
+    if TASK_GENERATOR_COUNT > 0:
+        generator = threading.Thread(target=task_generator, daemon=True)
+        generator.start()
     monitor = threading.Thread(target=monitor_load, daemon=True)
     monitor.start()
     accept_loop()

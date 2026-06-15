@@ -40,6 +40,15 @@ Edite os valores no topo dos arquivos:
 - `PEERS`: lista de masters vizinhos (ip:porta)
 - `NEIGHBORS`: mapa `master_id -> ip:porta`
 - `CAPACITY`, `RELEASE_THRESHOLD`
+- `TASK_GENERATOR_COUNT`: quantas tasks o master gera automaticamente ao iniciar
+- `TASK_GENERATOR_DELAY`: intervalo entre tasks geradas pelo master
+
+Exemplo no Windows PowerShell:
+```powershell
+$env:TASK_GENERATOR_COUNT = "50"
+$env:TASK_GENERATOR_DELAY = "0.1"
+python master.py
+```
 
 ### worker.py
 - `WORKER_ID`
