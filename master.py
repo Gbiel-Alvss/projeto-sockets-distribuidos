@@ -14,18 +14,38 @@ from protocol import (
     validate_worker_hello,
 )
 
-MASTER_ID = "Master_A"
+# ===== CONFIGURACAO (edite antes de rodar) =====
+MASTER_ID = os.getenv("MASTER_ID", "Master_A")
 HOST = "0.0.0.0"
-PORT = 10000
-MASTER_ADDRESS = f"{HOST}:{PORT}"
+PORT = int(os.getenv("MASTER_PORT", "10000"))
 
-PEERS = ["10.62.206.216:9100"]
-NEIGHBORS = {"Master_B": "10.62.206.216:9100"}
+# Maquina 1: PEERS = ["<IP_M2>:9100"]
+# Maquina 2: PEERS = ["<IP_M1>:10000"]
+PEERS_STR = os.getenv("PEERS", "")
+PEERS = [p.strip() for p in PEERS_STR.split(",") if p.strip()] if PEERS_STR else []
+
+# Maquina 1: NEIGHBORS = {"Master_B": "<IP_M2>:9100"}
+# Maquina 2: NEIGHBORS = {"Master_A": "<IP_M1>:10000"}
+NEIGHBORS_STR = os.getenv("NEIGHBORS", "")
+NEIGHBORS = {}
+if NEIGHBORS_STR:
+    for entry in NEIGHBORS_STR.split(","):
+        entry = entry.strip()
+        if ":" in entry:
+            parts = entry.split(":", 2)
+            if len(parts) == 3:
+                mid, ip, port = parts
+                NEIGHBORS[mid] = f"{ip}:{port}"
+            elif len(parts) == 2:
+                NEIGHBORS[parts[0]] = parts[1]
 
 CAPACITY = 100
 RELEASE_THRESHOLD = 60
+
+# Maquina 2: colocar 200 aqui para gerar tasks
 TASK_GENERATOR_COUNT = int(os.getenv("TASK_GENERATOR_COUNT", "0"))
 TASK_GENERATOR_DELAY = float(os.getenv("TASK_GENERATOR_DELAY", "0.1"))
+# ===============================================
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
