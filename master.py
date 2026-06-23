@@ -2,10 +2,11 @@ import concurrent.futures
 import os
 import logging
 import queue
-import socket
+import socket as sk
 import threading
 import time
 import uuid
+import supervisor as sv
 from net import encode_message, decode_stream
 from protocol import (
     validate_heartbeat_request,
@@ -16,12 +17,12 @@ from protocol import (
 
 # ===== CONFIGURACAO (edite antes de rodar) =====
 MASTER_ID = os.getenv("MASTER_ID", "Master_A")
-HOST = "0.0.0.0"
-PORT = int(os.getenv("MASTER_PORT", "10000"))
+HOST = "10.62.206.22"
+PORT = int(os.getenv("MASTER_PORT", "8000"))
 
 # Maquina 1: PEERS = ["<IP_M2>:9100"]
 # Maquina 2: PEERS = ["<IP_M1>:10000"]
-PEERS_STR = os.getenv("PEERS", "")
+PEERS_STR = "10.62.206.20:8000"
 PEERS = [p.strip() for p in PEERS_STR.split(",") if p.strip()] if PEERS_STR else []
 
 # Maquina 1: NEIGHBORS = {"Master_B": "<IP_M2>:9100"}
@@ -39,11 +40,11 @@ if NEIGHBORS_STR:
             elif len(parts) == 2:
                 NEIGHBORS[parts[0]] = parts[1]
 
-CAPACITY = 100
-RELEASE_THRESHOLD = 60
+CAPACITY = 10
+RELEASE_THRESHOLD = 1
 
 # Maquina 2: colocar 200 aqui para gerar tasks
-TASK_GENERATOR_COUNT = int(os.getenv("TASK_GENERATOR_COUNT", "0"))
+TASK_GENERATOR_COUNT = int(os.getenv("TASK_GENERATOR_COUNT", "100"))
 TASK_GENERATOR_DELAY = float(os.getenv("TASK_GENERATOR_DELAY", "0.1"))
 # ===============================================
 
@@ -51,8 +52,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 TASK_QUEUE = queue.Queue()
 BORROWED_WORKERS = {}
+LENT_WORKERS = {}
 WORKERS = {}
 LOCK = threading.Lock()
+
+TASKS_COMPLETED = 0
+TASKS_FAILED = 0
+TASKS_RUNNING = 1
+TASK_TIMESTAMPS = {}
 
 
 def send_message(conn, msg):
@@ -114,6 +121,8 @@ def handle_master_message(msg, conn):
                 "payload": {"new_master_address": requester_addr},
             }
             send_message(worker_conn, redirect)
+            with LOCK:
+                LENT_WORKERS[wid] = requester_addr
         return
 
     if msg_type == "register_temporary_worker":
@@ -147,9 +156,9 @@ def request_help():
     def ask_peer(peer):
         host, port = peer.split(":")
         try:
-            with socket.create_connection((host, int(port)), timeout=5) as s:
+            with sk.create_connection((host, int(port)), timeout=50) as s:
                 send_message(s, msg)
-                s.settimeout(5)
+                s.settimeout(50)
                 buffer = b""
                 while True:
                     buffer += s.recv(4096)
@@ -199,7 +208,7 @@ def release_borrowed_workers():
         # 3. Tenta notificar o Master Original, tolerando a falha se ele estiver offline
         host, port = original_master_address.split(":")
         try:
-            with socket.create_connection((host, int(port)), timeout=5) as s:
+            with sk.create_connection((host, int(port)), timeout=50) as s:
                 notify = {
                     "type": "notify_worker_returned",
                     "request_id": str(uuid.uuid4()),
@@ -228,6 +237,7 @@ def task_generator():
 
 
 def handle_connection(conn, addr):
+    global TASKS_COMPLETED
     logging.info("connection from %s", addr)
     buffer = b""
     worker_id = None
@@ -250,7 +260,11 @@ def handle_connection(conn, addr):
                     continue
 
                 if msg.get("TASK") == "QUERY" and msg.get("USER") and not msg.get("WORKER"):
-                    TASK_QUEUE.put(msg.get("USER"))
+                    task_user = msg.get("USER")
+                    TASK_QUEUE.put(task_user)
+                    with LOCK:
+                        TASK_TIMESTAMPS[task_user] = time.time()
+                        TASKS_RUNNING += 1
                     continue
 
                 if msg.get("WORKER") == "ALIVE":
@@ -267,7 +281,14 @@ def handle_connection(conn, addr):
 
                 if msg.get("STATUS"):
                     validate_task_status(msg)
-                    logging.info("task status from %s: %s", msg.get("WORKER_UUID"), msg.get("STATUS"))
+                    status_val = msg.get("STATUS")
+                    logging.info("task status from %s: %s", msg.get("WORKER_UUID"), status_val)
+                    with LOCK:
+                        TASKS_RUNNING = 1
+                        if status_val == "OK":
+                            TASKS_COMPLETED += 1
+                        else:
+                            TASKS_FAILED += 1
                     send_message(conn, {"STATUS": "ACK", "WORKER_UUID": msg.get("WORKER_UUID")})
                     continue
             except ValueError as exc:
@@ -277,12 +298,13 @@ def handle_connection(conn, addr):
         with LOCK:
             WORKERS.pop(worker_id, None)
             BORROWED_WORKERS.pop(worker_id, None)
+            LENT_WORKERS.pop(worker_id, None)
     conn.close()
 
 
 def accept_loop():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server = sk.socket(sk.AF_INET, sk.SOCK_STREAM)
+    server.setsockopt(sk.SOL_SOCKET, sk.SO_REUSEADDR, 1)
     server.bind((HOST, PORT))
     server.listen()
     logging.info("Master listening on %s:%s", HOST, PORT)
@@ -292,12 +314,39 @@ def accept_loop():
         t.start()
 
 
+def report_loop():
+    while True:
+        try:
+            sv.send_report(
+                server_uuid=MASTER_ID,
+                hostname=sk.gethostname(),
+                task_queue=TASK_QUEUE,
+                workers=WORKERS,
+                borrowed_workers=BORROWED_WORKERS,
+                lent_workers=LENT_WORKERS,
+                neighbors=NEIGHBORS,
+                capacity=CAPACITY,
+                release_threshold=RELEASE_THRESHOLD,
+                tasks_completed=TASKS_COMPLETED,
+                tasks_failed=TASKS_FAILED,
+                tasks_running=TASKS_RUNNING,
+                task_timestamps=TASK_TIMESTAMPS,
+                supervisor_host=sv.SUPERVISOR_HOST,
+                supervisor_port=sv.SUPERVISOR_PORT,
+            )
+        except Exception as exc:
+            logging.warning("report loop error: %s", exc)
+        time.sleep(30)
+
+
 def run_master():
     if TASK_GENERATOR_COUNT > 0:
         generator = threading.Thread(target=task_generator, daemon=True)
         generator.start()
     monitor = threading.Thread(target=monitor_load, daemon=True)
     monitor.start()
+    reporter = threading.Thread(target=report_loop, daemon=True)
+    reporter.start()
     accept_loop()
 
 

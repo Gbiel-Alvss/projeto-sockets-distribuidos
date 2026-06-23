@@ -7,11 +7,11 @@ import os
 from net import encode_message, decode_stream
 from protocol import validate_ack, validate_heartbeat_response, validate_task_delivery
 
-WORKER_ID = os.getenv("WORKER_ID", "W-2")
-MASTER_ID = os.getenv("MASTER_ID", "Master_16")
+WORKER_ID = os.getenv("WORKER_ID", "W-22")
+MASTER_ID = os.getenv("MASTER_ID", "Master_16_16")
 # default kept for existing behavior but can be overridden with env var
-MASTER_HOST = os.getenv("MASTER_HOST", "10.62.206.20")
-MASTER_PORT = int(os.getenv("MASTER_PORT", os.getenv("PORT", "10000")))
+MASTER_HOST = os.getenv("MASTER_HOST", "10.62.206.22")
+MASTER_PORT = int(os.getenv("MASTER_PORT", os.getenv("PORT", "8000")))
 HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", "10"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -66,6 +66,7 @@ def run_worker():
                         messages, buffer = decode_stream(buffer)
                         for msg in messages:
                             if msg.get("type") == "command_redirect":
+                                print(msg)
                                 new_master_address = msg["payload"]["new_master_address"]
                                 current_host, current_port = parse_address(new_master_address)
                                 borrowed = True
@@ -79,6 +80,7 @@ def run_worker():
                                 break
                             if msg.get("TASK") in ("QUERY", "NO_TASK"):
                                 validate_task_delivery(msg)
+                                print(msg)
                                 if msg.get("TASK") == "NO_TASK":
                                     time.sleep(1)
                                     break

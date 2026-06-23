@@ -8,8 +8,10 @@ import ssl
 import time
 import uuid
 
-SUPERVISOR_HOST = "nuted-ia.dev"
-SUPERVISOR_PORT = 443
+SUPERVISOR_HOST = os.getenv("SUPERVISOR_HOST", "10.62.206.206")
+SUPERVISOR_PORT = int(os.getenv("SUPERVISOR_PORT", "8000"))
+
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "")
 
 
 def _get_system_metrics():
@@ -180,7 +182,8 @@ def send_report(server_uuid, hostname, task_queue, workers,
                 borrowed_workers, lent_workers, neighbors,
                 capacity, release_threshold,
                 tasks_completed, tasks_failed, tasks_running,
-                task_timestamps, supervisor_host, supervisor_port):
+                task_timestamps, supervisor_host, supervisor_port,
+                dashboard_url=None):
     try:
         payload = build_report(
             server_uuid, hostname, task_queue, workers,
@@ -192,24 +195,60 @@ def send_report(server_uuid, hostname, task_queue, workers,
 
         data = json.dumps(payload).encode("utf-8")
 
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = True
+        sock = socket.create_connection(
+            (supervisor_host, supervisor_port),
+            timeout=10
+        )
 
-        sock = socket.create_connection((supervisor_host, supervisor_port), timeout=10)
         try:
-            with ctx.wrap_socket(sock, server_hostname=supervisor_host) as tls:
-                tls.sendall(data)
-                logging.info(
-                    "supervisor report sent uuid=%s pending=%d running=%d completed=%d lent=%d borrowed=%d",
-                    server_uuid,
-                    task_queue.qsize(),
-                    tasks_running,
-                    tasks_completed,
-                    len(lent_workers),
-                    len(borrowed_workers),
-                )
-        except Exception:
+            sock.sendall(data)
+
+            logging.info(
+                "supervisor report sent uuid=%s pending=%d running=%d completed=%d lent=%d borrowed=%d",
+                server_uuid,
+                task_queue.qsize(),
+                tasks_running,
+                tasks_completed,
+                len(lent_workers),
+                len(borrowed_workers),
+            )
+
+            # tentativa de resposta (opcional)
+            try:
+                response = sock.recv(4096)
+                if response:
+                    logging.info("supervisor response: %s", response)
+            except socket.timeout:
+                pass
+
+        finally:
             sock.close()
-            raise
+
+        # ===== DASHBOARD =====
+        url = dashboard_url or DASHBOARD_URL
+        if url:
+            try:
+                host_port = url.replace("http://", "").replace("https://", "").split("/")[0]
+                dhost, dport = host_port.split(":") if ":" in host_port else (host_port, "80")
+
+                dsock = socket.create_connection((dhost, int(dport)), timeout=5)
+
+                header = (
+                    f"POST /api/report HTTP/1.1\r\n"
+                    f"Host: {dhost}:{dport}\r\n"
+                    f"Content-Type: application/json\r\n"
+                    f"Content-Length: {len(data)}\r\n"
+                    f"Connection: close\r\n\r\n"
+                ).encode()
+
+                dsock.sendall(header + data)
+                dsock.recv(1024)
+                dsock.close()
+
+                logging.info("dashboard report sent to %s", url)
+
+            except Exception as dex:
+                logging.warning("dashboard report failed: %s", dex)
+
     except Exception as exc:
         logging.warning("supervisor report failed: %s", exc)
